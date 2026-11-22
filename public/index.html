@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Хуурамчийг ол — Онлайн</title>
+<style>
+:root{--bg:#14151f;--card:#1f2133;--line:#2e3150;--tx:#f1f2f8;--mut:#9a9db8;--ac:#ff4d5e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,sans-serif;min-height:100vh}
+main{max-width:480px;margin:0 auto;padding:20px 16px 40px}
+h1{text-align:center;font-size:28px;margin:8px 0}
+h2{font-size:14px;margin:0 0 10px;color:var(--mut)}
+.sub{text-align:center;color:var(--mut);margin:0 0 18px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.btn{width:100%;padding:14px;border:0;border-radius:12px;background:var(--ac);color:#fff;font-size:17px;font-weight:700;cursor:pointer}
+.btn.sec{background:var(--line)}
+.btn.sm{width:auto;padding:6px 14px;font-size:16px}
+input:not([type=checkbox]),textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--tx);padding:10px;font:inherit}
+input[type=checkbox]{width:22px;height:22px;accent-color:var(--ac)}
+.chip{padding:8px 14px;margin:0 4px 8px 0;border-radius:20px;border:1px solid var(--line);background:none;color:var(--tx);font-size:15px;cursor:pointer}
+.chip.on{background:var(--ac);border-color:var(--ac)}
+.tap{height:240px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:20px;background:var(--card);border:2px dashed var(--line);cursor:pointer;font-size:20px;padding:20px;margin-bottom:16px;user-select:none}
+.tap.open{border-style:solid;border-color:var(--ac)}
+.tap small{color:var(--mut)}
+.word{font-size:34px;font-weight:800;word-break:break-word}
+.time{font-size:68px;font-weight:800;text-align:center;margin:24px 0;font-variant-numeric:tabular-nums}
+.code{font-size:32px;font-weight:800;letter-spacing:4px;text-align:center;color:var(--ac)}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const CATS = {
+  "Хоол":["бууз","хуушуур","цуйван","банш","хорхог","шөл","пицца","бургер","суши","талх","зайрмаг","шашлик"],
+  "Амьтан":["морь","тэмээ","хонь","ямаа","үхэр","нохой","муур","арслан","баавгай","чоно","шонхор","загас"],
+  "Газар":["Улаанбаатар","Говь","Хөвсгөл нуур","Хархорин","Эрдэнэт","Дархан","Чингис хаан талбай","Токио","Парис","Нью-Йорк","Сөүл","Алтай"],
+  "Эд зүйл":["утас","ном","шүхэр","цүнх","түлхүүр","толь","цаг","сандал","дэнлүү","шүдний сойз","компьютер","чихэвч"],
+  "Мэргэжил":["багш","эмч","жолооч","тогооч","цагдаа","малчин","инженер","програмист","зураач","дуучин","нисгэгч","тамирчин"],
+  "Спорт":["бөх","сур харваа","хөл бөмбөг","сагсан бөмбөг","теннис","шатар","бокс","жүдо","гольф","усан сэлэлт","морин уралдаан","волейбол"],
+  "Монгол ёс":["наадам","цагаан сар","морин хуур","хөөмий","гэр","дээл","хадаг","айраг","шагай","аргал","урт дуу","тооно"]
+};
+
+const S = {
+  code: null,
+  isHost: false,
+  players: [],
+  imp: 1,
+  hint: true,
+  cats: new Set(Object.keys(CATS)),
+  custom: "",
+  timed: true,
+  min: 3,
+  role: null,
+  result: null
+};
+
+const $ = s => document.querySelector(s);
+const app = $("#app");
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const maxImp = () => Math.max(1, Math.floor((S.players.length - 1) / 2));
+let iv;
+
+function lobby() {
+  clearInterval(iv);
+  app.innerHTML = `
+    <h1>🕵️ Хуурамчийг ол</h1>
+    <p class="sub">Өрөө үүсгэ эсвэл кодоор нэгдэж онлайн тогло</p>
+    <div class="box">
+      <h2>Өөрийн нэр</h2>
+      <input id="myName" placeholder="Жишээ нь: Бат" maxlength="20">
+    </div>
+    <div class="box">
+      <h2>Шинэ өрөө үүсгэх</h2>
+      <button class="btn" id="createBtn">Өрөө үүсгэх</button>
+    </div>
+    <div class="box">
+      <h2>Өрөөнд орох</h2>
+      <div class="row">
+        <input id="roomCode" placeholder="4 оронтой код" maxlength="6" style="text-transform:uppercase">
+        <button class="btn sec sm" id="joinBtn">Орох</button>
+      </div>
+    </div>`;
+
+  $("#createBtn").onclick = () => {
+    socket.emit("createRoom", { name: $("#myName").value });
+  };
+  $("#joinBtn").onclick = () => {
+    socket.emit("joinRoom", { code: $("#roomCode").value, name: $("#myName").value });
+  };
+}
+
+function roomView() {
+  clearInterval(iv);
+  const n = S.players.length;
+  S.imp = Math.min(S.imp, maxImp());
+
+  app.innerHTML = `
+    <div class="row"><b>🕵️ Өрөө: <span style="color:var(--ac)">${esc(S.code)}</span></b><button class="btn sec sm" id="leaveBtn">Гарах</button></div>
+    <div class="box" style="margin-top:12px">
+      <div class="sub" style="margin-bottom:4px">Өрөөний код</div>
+      <div class="code">${esc(S.code)}</div>
+      <h2 style="margin-top:12px">Холбогдсон тоглогчид (${n})</h2>
+      ${S.players.map(p => `<div style="padding:6px 0;border-top:1px solid var(--line)">${esc(p.name)} ${p.id === socket.id ? "(Чи)" : ""}</div>`).join("")}
+    </div>
+    ${S.isHost ? `
+      <div class="box">
+        <div class="row"><b>Хуурамч хүний тоо</b><span><button class="btn sec sm" id="im">−</button> <b>${S.imp}</b> <button class="btn sec sm" id="ip">+</button></span></div>
+        <div class="row" style="margin-top:12px"><b>Хуурамчид сэжүүр (ангилал) өгөх</b><input type="checkbox" id="hint" ${S.hint ? "checked" : ""}></div>
+      </div>
+      <div class="box">
+        <div class="row"><h2>Ангилал</h2><button class="btn sec sm" id="all">Бүгдийг</button></div>
+        ${Object.keys(CATS).map(c => `<button class="chip ${S.cats.has(c) ? "on" : ""}" data-c="${c}">${c}</button>`).join("")}
+        <h2 style="margin-top:10px">Өөрийн үгс (таслалаар тусгаарла, 3+)</h2>
+        <textarea id="cu" rows="2">${esc(S.custom)}</textarea>
+      </div>
+      <div class="box">
+        <div class="row"><b>Хугацаа хязгаарлах</b><input type="checkbox" id="tm" ${S.timed ? "checked" : ""}></div>
+        ${S.timed ? `<div class="row" style="margin-top:12px"><b>Үргэлжлэх хугацаа</b><span><button class="btn sec sm" id="mm">−</button> <b>${S.min} мин</b> <button class="btn sec sm" id="mp">+</button></span></div>` : ""}
+      </div>
+      <button class="btn" id="startBtn">Бүгдэд үг тарааж эхлэх</button>
+    ` : `
+      <div class="box"><p class="sub" style="margin:0">Өрөөний үүсгэгч тоглоом эхлүүлэхийг хүлээж байна...</p></div>
+    `}
+  `;
+
+  $("#leaveBtn").onclick = () => location.reload();
+
+  if (S.isHost) {
+    $("#im").onclick = () => { S.imp = Math.max(1, S.imp - 1); roomView(); };
+    $("#ip").onclick = () => { S.imp = Math.min(maxImp(), S.imp + 1); roomView(); };
+    $("#hint").onchange = e => S.hint = e.target.checked;
+    $("#all").onclick = () => {
+      S.cats = S.cats.size === Object.keys(CATS).length ? new Set() : new Set(Object.keys(CATS));
+      roomView();
+    };
+    app.querySelectorAll("[data-c]").forEach(e => e.onclick = () => {
+      const c = e.dataset.c;
+      S.cats.has(c) ? S.cats.delete(c) : S.cats.add(c);
+      roomView();
+    });
+    $("#cu").oninput = e => S.custom = e.target.value;
+    $("#tm").onchange = e => { S.timed = e.target.checked; roomView(); };
+    if (S.timed) {
+      $("#mm").onclick = () => { S.min = Math.max(1, S.min - 1); roomView(); };
+      $("#mp").onclick = () => { S.min = Math.min(15, S.min + 1); roomView(); };
+    }
+    $("#startBtn").onclick = () => {
+      socket.emit("startGame", {
+        code: S.code,
+        settings: {
+          imp: S.imp,
+          hint: S.hint,
+          cats: [...S.cats],
+          custom: S.custom,
+          timed: S.timed,
+          min: S.min
+        }
+      });
+    };
+  }
+}
+
+function gameView() {
+  clearInterval(iv);
+  const r = S.role;
+  let t = r.timed ? r.min * 60 : 0;
+  let open = false;
+
+  app.innerHTML = `
+    <div class="row"><b>🕵️ Өрөө: ${esc(S.code)}</b><span class="sub" style="margin:0">Эхлэх: <b>${esc(r.firstPlayer)}</b></span></div>
+    <div class="tap" id="card" style="margin-top:16px">👆<br>Өөрийн дүрийг харахын тулд товш</div>
+    <div class="time" id="t"></div>
+    ${S.isHost ? `<button class="btn" id="endBtn">Раунд хааж, хуурамчийг илрүүлэх</button>` : `<p class="sub">Раундыг хаахыг өрөөний үүсгэгч удирдана.</p>`}
+  `;
+
+  const card = $("#card");
+  card.onclick = () => {
+    open = !open;
+    card.className = open ? "tap open" : "tap";
+    if (!open) {
+      card.innerHTML = `👆<br>Өөрийн дүрийг харахын тулд товш`;
+    } else if (r.isImp) {
+      card.innerHTML = `<div class="word">🕵️ ХУУРАМЧ</div>${r.cat ? `<p>Сэжүүр: <b>${esc(r.cat)}</b></p>` : "<p>Сэжүүргүй</p>"}`;
+    } else {
+      card.innerHTML = `<small>Нууц үг (${esc(r.cat)})</small><div class="word">${esc(r.word)}</div>`;
+    }
+  };
+
+  const draw = () => {
+    const el = $("#t");
+    if (el) el.textContent = String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
+  };
+  draw();
+  iv = setInterval(() => {
+    t += r.timed ? -1 : 1;
+    if (t < 0) t = 0;
+    draw();
+  }, 1000);
+
+  if (S.isHost) {
+    $("#endBtn").onclick = () => socket.emit("endRound", { code: S.code });
+  }
+}
+
+function resultView() {
+  clearInterval(iv);
+  const res = S.result;
+  app.innerHTML = `
+    <h1>Хэн хуурамч байв? 🤔</h1>
+    <div class="tap open">
+      <small>Хуурамч</small>
+      <div class="word">${res.impostors.map(esc).join(", ")}</div>
+      <p>Нууц үг: <b>${esc(res.word)}</b><br><small>Ангилал: ${esc(res.cat)}</small></p>
+    </div>
+    ${S.isHost ? `<button class="btn" id="backLobby">Өрөөний тохиргоо руу буцах</button>` : `<p class="sub">Дараагийн тоглолтыг хүлээж байна...</p>`}
+  `;
+  if (S.isHost) {
+    $("#backLobby").onclick = () => roomView();
+  }
+}
+
+socket.on("errMsg", msg => alert(msg));
+socket.on("roomJoined", ({ code, isHost, players }) => {
+  S.code = code;
+  S.isHost = isHost;
+  S.players = players;
+  roomView();
+});
+socket.on("playersUpdated", players => {
+  S.players = players;
+  if (S.code && !S.role) roomView();
+});
+socket.on("roleAssigned", role => {
+  S.role = role;
+  S.result = null;
+  gameView();
+});
+socket.on("gameResult", result => {
+  S.result = result;
+  S.role = null;
+  resultView();
+});
+
+lobby();
+</script>
+</body>
+</html>
