@@ -61,8 +61,8 @@ io.on("connection", (socket) => {
     (settings.cats || []).forEach(c => {
       if (CATS[c]) CATS[c].forEach(w => pool.push([w, c]));
     });
-    const cu = (settings.custom || "").split(/[,
-]/).map(s => s.trim()).filter(Boolean);
+   
+const cu = (settings.custom || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean);
     if (cu.length >= 3) cu.forEach(w => pool.push([w, "Өөрийн үгс"]));
     if (!pool.length) return socket.emit("errMsg", "Ядаж нэг ангилал сонго.");
 
