@@ -21,6 +21,15 @@ const CATS = {
 
 const rooms = {};
 const pick = a => a[Math.floor(Math.random() * a.length)];
+const shuffle = a => {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+const sendPlayers = room => io.to(room.code).emit("playersUpdated", { players: room.players, hostId: room.hostId });
 
 function makeCode() {
   return Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -33,10 +42,14 @@ io.on("connection", (socket) => {
       code,
       hostId: socket.id,
       players: [{ id: socket.id, name: (name || "").trim() || "Тоглогч 1" }],
-      game: null
+      game: null,
+      chat: [],
+      used: new Set(),
+      lastWord: null,
+      lastImps: new Set()
     };
     socket.join(code);
-    socket.emit("roomJoined", { code, isHost: true, players: rooms[code].players });
+    socket.emit("roomJoined", { code, isHost: true, players: rooms[code].players, chat: [] });
   });
 
   socket.on("joinRoom", ({ code, name }) => {
@@ -48,8 +61,8 @@ io.on("connection", (socket) => {
 
     room.players.push({ id: socket.id, name: (name || "").trim() || `Тоглогч ${room.players.length + 1}` });
     socket.join(code);
-    socket.emit("roomJoined", { code, isHost: room.hostId === socket.id, players: room.players });
-    io.to(code).emit("playersUpdated", room.players);
+    socket.emit("roomJoined", { code, isHost: room.hostId === socket.id, players: room.players, chat: room.chat });
+    sendPlayers(room);
   });
 
   socket.on("startGame", ({ code, settings }) => {
@@ -61,17 +74,27 @@ io.on("connection", (socket) => {
     (settings.cats || []).forEach(c => {
       if (CATS[c]) CATS[c].forEach(w => pool.push([w, c]));
     });
-   
-const cu = (settings.custom || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+    const cu = (settings.custom || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean);
     if (cu.length >= 3) cu.forEach(w => pool.push([w, "Өөрийн үгс"]));
     if (!pool.length) return socket.emit("errMsg", "Ядаж нэг ангилал сонго.");
 
-    const [word, cat] = pick(pool);
+    let fresh = pool.filter(([w]) => !room.used.has(w));
+    if (!fresh.length) {
+      room.used.clear();
+      fresh = pool.filter(([w]) => w !== room.lastWord);
+    }
+    if (!fresh.length) fresh = pool;
+    const [word, cat] = pick(fresh);
+    room.used.add(word);
+    room.lastWord = word;
     const maxImp = Math.max(1, Math.floor((room.players.length - 1) / 2));
     const impCount = Math.min(Math.max(1, settings.imp || 1), maxImp);
 
-    const shuffledIds = room.players.map(p => p.id).sort(() => Math.random() - 0.5);
-    const impSet = new Set(shuffledIds.slice(0, impCount));
+    const ids = room.players.map(p => p.id);
+    const order = shuffle(ids.filter(id => !room.lastImps.has(id)))
+      .concat(shuffle(ids.filter(id => room.lastImps.has(id))));
+    const impSet = new Set(order.slice(0, impCount));
+    room.lastImps = impSet;
     const firstPlayer = pick(room.players).name;
 
     room.game = {
@@ -95,6 +118,17 @@ const cu = (settings.custom || "").split(/[,\n]/).map(s => s.trim()).filter(Bool
         min: room.game.min
       });
     });
+  });
+
+  socket.on("chat", ({ code, text }) => {
+    const room = rooms[code];
+    const p = room && room.players.find(p => p.id === socket.id);
+    text = String(text || "").trim().slice(0, 200);
+    if (!p || !text) return;
+    const msg = { id: p.id, name: p.name, text };
+    room.chat.push(msg);
+    if (room.chat.length > 100) room.chat.shift();
+    io.to(code).emit("chat", msg);
   });
 
   socket.on("endRound", ({ code }) => {
@@ -122,7 +156,7 @@ const cu = (settings.custom || "").split(/[,\n]/).map(s => s.trim()).filter(Bool
           delete rooms[code];
         } else {
           if (room.hostId === socket.id) room.hostId = room.players[0].id;
-          io.to(code).emit("playersUpdated", room.players);
+          sendPlayers(room);
         }
       }
     }
